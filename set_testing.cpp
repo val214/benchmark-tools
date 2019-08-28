@@ -23,11 +23,13 @@ struct TestCase {
 
 std::vector<TestCase> testCases;
 
+#define MAX_LINE 1024
+
 int readTestCases(const std::string& fileName) {
     FILE* fp = fopen(fileName.c_str(), "r");
     if (!fp) return 0;
 
-    char buf[100], cmd[100], exp[100];
+    char buf[MAX_LINE], cmd[MAX_LINE], exp[MAX_LINE];
     int n = 0;
     for(;;) {
         if (fgets(buf, sizeof(buf), fp) == NULL) break;
