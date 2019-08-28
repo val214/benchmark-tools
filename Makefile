@@ -3,6 +3,9 @@
 bench_spike: bench_spike.cpp
 	g++ bench_spike.cpp -o bench_spike -Iinclude -std=c++11 -lmysqlclient -pthread -O2 -ggdb
 
+set_testing: set_testing.cpp
+	g++ set_testing.cpp -o set_testing -Iinclude -std=c++11 -lmysqlclient -pthread -O2 -ggdb
+
 unique_queries: unique_queries.cpp
 	g++ unique_queries.cpp -o unique_queries -Iinclude -std=c++11 -lmysqlclient -pthread -O2 -ggdb
 
