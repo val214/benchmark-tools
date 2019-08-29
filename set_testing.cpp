@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <mysql/mysql.h>
 #include <string.h>
+#include <string>
 #include <time.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -10,6 +11,9 @@
 #include <boost/histogram.hpp>
 #include <iostream>
 #include <fstream>
+#include "json.hpp"
+
+using nlohmann::json;
 
 // using histogram from https://github.com/HDembinski/histogram
 
@@ -18,7 +22,7 @@
 
 struct TestCase {
     std::string command;
-    std::map<std::string, std::string> vars;
+    json expected_vars;
 };
 
 std::vector<TestCase> testCases;
@@ -29,13 +33,18 @@ int readTestCases(const std::string& fileName) {
     FILE* fp = fopen(fileName.c_str(), "r");
     if (!fp) return 0;
 
-    char buf[MAX_LINE], cmd[MAX_LINE], exp[MAX_LINE];
+    char buf[MAX_LINE], col1[MAX_LINE], col2[MAX_LINE];
     int n = 0;
     for(;;) {
         if (fgets(buf, sizeof(buf), fp) == NULL) break;
-        n = sscanf(buf, " \"%[^\"]\", \"%[^\"]\"", cmd, exp);
+        n = sscanf(buf, " \"%[^\"]\", \"%[^\"]\"", col1, col2);
         if (n == 0) break;
-        printf("command: %s, exp: %s\n", cmd, exp);
+
+        char *p = col2;
+        while(*p++) if(*p == '\'') *p = '\"';
+
+        json vars = json::parse(col2);
+        testCases.push_back({col1, vars});
     }
 
     fclose(fp);
@@ -146,18 +155,13 @@ void * my_conn_thread(void *arg) {
 	for (j=0; j<queries; j++) {
 		int fr = fastrand();
 		int r1=fr%count;
-		if (sysbench) {
-			sprintf(query,"SELECT * FROM sbtest WHERE id=%d", fr%1000);
-		} else {
-			int r2=fastrand()%uniquequeries;
-			int r3=fastrand()%uniquequeries;
-			sprintf(query,"SELECT * FROM test.t1");
-		}
-		//sprintf(query,"SELECT LAST_INSERT_ID()");
+        int r2=fastrand()%testCases.size();
+
 		if (j%queries_per_connections==0) {
 			mysql=mysqlconns[r1];
 		}
-		if (mysql_query(mysql,query)) {
+		printf("MYSQL query: %s\n", testCases[r2].command.c_str());
+		if (mysql_query(mysql,testCases[r2].command.c_str())) {
 			if (silent==0) {
 				fprintf(stderr,"%s\n", mysql_error(mysql));
 			}
