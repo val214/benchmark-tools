@@ -111,14 +111,52 @@ inline int fastrand() {
 	return (g_seed>>16)&0x7FFF;
 }
 
-void * my_conn_thread(void *arg) {
-/*
-	auto h0 = bh::make_static_histogram(bh::axis::regular<>(20, 0, 2000, "us"));
-	auto h1 = bh::make_static_histogram(bh::axis::regular<>(20, 0, 40000, "us"));
-	auto h2 = bh::make_static_histogram(bh::axis::regular<>(25, 0, 1000, "ms"));
-	auto h3 = bh::make_static_histogram(bh::axis::regular<>(10, 0, 10, "s"));
-*/
+void parseResult(MYSQL_RES *result, json& j) {
+        if(!result) return;
+        MYSQL_ROW row;
 
+        int num_fields = mysql_num_fields(result);
+
+        while ((row = mysql_fetch_row(result)))
+            j[row[0]] = row[1];
+ }
+
+void dumpResult(MYSQL_RES *result) {
+        if(!result) return;
+        MYSQL_ROW row;
+
+        int num_fields = mysql_num_fields(result);
+
+        while ((row = mysql_fetch_row(result)))
+        {
+            for(int i = 0; i < num_fields; i++)
+            {
+                printf("%s ", row[i] ? row[i] : "NULL");
+            }
+            printf("\n");
+        }
+ }
+
+void queryVariables(MYSQL *mysql, json& j) {
+    char *query = (char*)"SELECT * FROM performance_schema.session_variables WHERE variable_name IN "
+                         " ('hostname', 'sql_log_bin', 'sql_mode', 'init_connect', 'time_zone', 'autocommit', 'sql_auto_is_null', 'sql_safe_updates', 'session_track_gtids', 'max_join_size', 'net_write_timeout', 'sql_select_limit');";
+    if (mysql_query(mysql, query)) {
+        if (silent==0) {
+            fprintf(stderr,"%s\n", mysql_error(mysql));
+        }
+    } else {
+        MYSQL_RES *result = mysql_store_result(mysql);
+        parseResult(result, j);
+
+        printf("json: %s\n", j.dump().c_str());
+
+       mysql_free_result(result);
+        __sync_fetch_and_add(&g_select_OK,1);
+    }
+}
+
+
+void * my_conn_thread(void *arg) {
 	g_seed = time(NULL) ^ getpid() ^ pthread_self();
 	unsigned int connect_OK=0;
 	unsigned int connect_ERR=0;
@@ -129,6 +167,8 @@ void * my_conn_thread(void *arg) {
 	char query[128];
 	unsigned long long b, e, ce;
 	MYSQL **mysqlconns=(MYSQL **)malloc(sizeof(MYSQL *)*count);
+	json vars;
+
 	if (mysqlconns==NULL) {
 		exit(EXIT_FAILURE);
 	}
@@ -160,12 +200,32 @@ void * my_conn_thread(void *arg) {
 		if (j%queries_per_connections==0) {
 			mysql=mysqlconns[r1];
 		}
-		printf("MYSQL query: %s\n", testCases[r2].command.c_str());
-		if (mysql_query(mysql,testCases[r2].command.c_str())) {
-			if (silent==0) {
-				fprintf(stderr,"%s\n", mysql_error(mysql));
-			}
-			select_ERR++;
+
+        for (auto& el : testCases[r2].expected_vars.items()) {
+            vars[el.key()] = el.value();
+        }
+       printf("vars: %s\n", vars.dump().c_str());
+       sprintf(query,"%s", testCases[r2].command.c_str());
+
+        printf("%s\n", query);
+
+        if (mysql_query(mysql, query)) {
+            if (silent==0) {
+                fprintf(stderr,"%s\n", mysql_error(mysql));
+            }
+		} else {
+			MYSQL_RES *result = mysql_store_result(mysql);
+			mysql_free_result(result);
+			select_OK++;
+			__sync_fetch_and_add(&g_select_OK,1);
+		}
+
+		int sleepDelay = fastrand()%100;
+		usleep(sleepDelay * 1000);
+
+		sprintf(query, "SELECT %d;", sleepDelay);
+		if (mysql_query(mysql,query)) {
+            select_ERR++;
 			__sync_fetch_and_add(&g_select_ERR,1);
 		} else {
 			MYSQL_RES *result = mysql_store_result(mysql);
@@ -173,6 +233,19 @@ void * my_conn_thread(void *arg) {
 			select_OK++;
 			__sync_fetch_and_add(&g_select_OK,1);
 		}
+		json mysql_vars;
+        queryVariables(mysql, mysql_vars);
+
+        for (auto& el : vars.items()) {
+            auto k = mysql_vars.find(el.key());
+            if (k.value() != el.value())
+                printf("ERR - variable: %s, expected: %s, actual: %s\n", el.key().c_str(), el.value().get<std::string>().c_str(), k.value().get<std::string>().c_str());
+            else
+                printf("OK - variable: %s, expected: %s, actual: %s\n", el.key().c_str(), el.value().get<std::string>().c_str(), k.value().get<std::string>().c_str());
+
+        }
+
+        printf("\n\n");
 	}
 	__sync_fetch_and_add(&query_phase_completed,1);
 
@@ -276,7 +349,7 @@ int main(int argc, char *argv[]) {
 		if ( pthread_create(&thi[i], NULL, my_conn_thread , NULL) != 0 )
     		perror("Thread creation");
 	}
-	{
+/*	{
 		i=0;
 		begin_conn = monotonic_time();
 		unsigned long long prev_time = begin_conn;
@@ -288,7 +361,7 @@ int main(int argc, char *argv[]) {
 				unsigned long long curr_conn = __sync_fetch_and_add(&status_connections,0);
 				unsigned long long curr_time = monotonic_time();
 				//fprintf(stderr,"Connections: %d\n",__sync_fetch_and_add(&status_connections,0));
-				std::cerr << "Status : Created " << curr_conn << " total , new " << curr_conn - prev_conn << " connections in "  << double( curr_time - prev_time ) / 1000 << " millisecs. : " << double((curr_conn-prev_conn)*1000000/(curr_time - prev_time)  ) << " Conn/s\n" ;
+				// std::cerr << "Status : Created " << curr_conn << " total , new " << curr_conn - prev_conn << " connections in "  << double( curr_time - prev_time ) / 1000 << " millisecs. : " << double((curr_conn-prev_conn)*1000000/(curr_time - prev_time)  ) << " Conn/s\n" ;
 				i=0;
 				prev_conn = curr_conn;
 				prev_time = curr_time;
@@ -296,7 +369,7 @@ int main(int argc, char *argv[]) {
 			}
 		}
 		end_conn = monotonic_time();
-		std::cerr << "Created " << __sync_fetch_and_add(&status_connections,0) << " connections in "  << double( end_conn - begin_conn ) / 1000 << " millisecs.\n" ;
+		// std::cerr << "Created " << __sync_fetch_and_add(&status_connections,0) << " connections in "  << double( end_conn - begin_conn ) / 1000 << " millisecs.\n" ;
 	}
 	{
 		i=0;
@@ -309,7 +382,7 @@ int main(int argc, char *argv[]) {
 			if (i==100) {
 				unsigned long long curr_conn = __sync_fetch_and_add(&g_select_OK,0);
 				unsigned long long curr_time = monotonic_time();
-				std::cerr << "Status : Executed " << curr_conn << " total , new " << curr_conn - prev_conn << " queries in "  << double( curr_time - prev_time ) / 1000 << " millisecs. : " << double((curr_conn-prev_conn)*1000000/(curr_time - prev_time)  ) << " QPS\n" ;
+				// std::cerr << "Status : Executed " << curr_conn << " total , new " << curr_conn - prev_conn << " queries in "  << double( curr_time - prev_time ) / 1000 << " millisecs. : " << double((curr_conn-prev_conn)*1000000/(curr_time - prev_time)  ) << " QPS\n" ;
 				//fprintf(stderr,"Queries [OK/ERR]: %d / %d\n", __sync_fetch_and_add(&g_select_OK,0), __sync_fetch_and_add(&g_select_ERR,0));
 				i=0;
 				prev_conn = curr_conn;
@@ -317,8 +390,8 @@ int main(int argc, char *argv[]) {
 			}
 		}
 		end_query = monotonic_time();
-		std::cerr << "Executed " << __sync_fetch_and_add(&g_select_OK,0) << " queries in "  << double( end_query - begin_query ) / 1000 << " millisecs.\n" ;
-	}
+		// std::cerr << "Executed " << __sync_fetch_and_add(&g_select_OK,0) << " queries in "  << double( end_query - begin_query ) / 1000 << " millisecs.\n" ;
+	}*/
 	for (i=0; i<num_threads; i++) {
 		pthread_join(thi[i], NULL);
 	}
