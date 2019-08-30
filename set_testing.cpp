@@ -239,9 +239,9 @@ void * my_conn_thread(void *arg) {
         for (auto& el : vars.items()) {
             auto k = mysql_vars.find(el.key());
             if (k.value() != el.value())
-                printf("ERR - variable: %s, expected: %s, actual: %s\n", el.key().c_str(), el.value().get<std::string>().c_str(), k.value().get<std::string>().c_str());
+                printf("FAIL - variable: %s, expected: %s, actual: %s\n", el.key().c_str(), el.value().get<std::string>().c_str(), k.value().get<std::string>().c_str());
             else
-                printf("OK - variable: %s, expected: %s, actual: %s\n", el.key().c_str(), el.value().get<std::string>().c_str(), k.value().get<std::string>().c_str());
+                printf("PASS - variable: %s, expected: %s, actual: %s\n", el.key().c_str(), el.value().get<std::string>().c_str(), k.value().get<std::string>().c_str());
 
         }
 
