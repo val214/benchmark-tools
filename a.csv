@@ -1,5 +1,7 @@
 "set sql_mode=''","{'sql_mode':''}"
-"SET sql_mode=''", "{'sql_mode':''}"
+"SET sql_mode='PIPES_AS_CONCAT,NO_ENGINE_SUBSTITUTION'", "{'sql_mode':'PIPES_AS_CONCAT,NO_ENGINE_SUBSTITUTION'}"
+"SET sql_log_bin=0", "{'sql_log_bin':'OFF'}"
+"SET sql_log_bin=1", "{'sql_log_bin':'ON'}"
 "SET time_zone='+01:00'","{'time_zone':'+01:00'}"
 "SET time_zone='-03:00', sql_mode='ALLOW_INVALID_DATES'","{'time_zone':'-03:00', 'sql_mode':'ALLOW_INVALID_DATES'}"
 "SET autocommit=0","{'autocommit':'OFF'}"

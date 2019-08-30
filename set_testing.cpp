@@ -148,7 +148,7 @@ void queryVariables(MYSQL *mysql, json& j) {
         MYSQL_RES *result = mysql_store_result(mysql);
         parseResult(result, j);
 
-        printf("json: %s\n", j.dump().c_str());
+        printf("actual: %s\n", j.dump().c_str());
 
        mysql_free_result(result);
         __sync_fetch_and_add(&g_select_OK,1);
@@ -204,7 +204,7 @@ void * my_conn_thread(void *arg) {
         for (auto& el : testCases[r2].expected_vars.items()) {
             vars[el.key()] = el.value();
         }
-       printf("vars: %s\n", vars.dump().c_str());
+       printf("expected: %s\n", vars.dump().c_str());
        sprintf(query,"%s", testCases[r2].command.c_str());
 
         printf("%s\n", query);
