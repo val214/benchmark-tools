@@ -40,7 +40,26 @@ namespace Color {
                 return os << "\033[" << mod.code << "m";
             }
     };
+    class DefColor {
+        friend std::ostream&
+            operator<<(std::ostream& os, const DefColor& mod) {
+                return os << "\033[" << Code::FG_DEFAULT << "m";
+            }
+    };
+    class Green {
+        friend std::ostream&
+            operator<<(std::ostream& os, const Green& mod) {
+                return os << "\033[" << Code::FG_GREEN << "m";
+            }
+    };
+    class Red {
+        friend std::ostream&
+            operator<<(std::ostream& os, const Red& mod) {
+                return os << "\033[" << Code::FG_RED << "m";
+            }
+    };
 }
+
 
 struct TestCase {
     std::string command;
@@ -202,10 +221,13 @@ void queryInternalStatus(MYSQL *mysql, json& j) {
         __sync_fetch_and_add(&g_select_OK,1);
     }
 
+    // value types in mysql and in proxysql are different
+    // we should convert proxysql values to mysql format to compare
     for (auto& el : j.items()) {
         if (el.key() == "conn") {
             std::string sql_log_bin_value;
 
+            // sql_log_bin {0|1}
             if (el.value()["sql_log_bin"] == 1) {
                 el.value().erase("sql_log_bin");
                 j["conn"]["sql_log_bin"] = "ON";
@@ -214,6 +236,17 @@ void queryInternalStatus(MYSQL *mysql, json& j) {
                 el.value().erase("sql_log_bin");
                 j["conn"]["sql_log_bin"] = "OFF";
             }
+
+            // autocommit {true|false}
+            if (el.value()["autocommit"]) {
+                el.value().erase("autocommit");
+                j["conn"]["autocommit"] = "ON";
+            }
+            else {
+                el.value().erase("autocommit");
+                j["conn"]["autocommit"] = "OFF";
+             }
+
         }
     }
 }
@@ -307,9 +340,9 @@ void * my_conn_thread(void *arg) {
             auto s = proxysql_vars["conn"].find(el.key());
 
             if (k.value() != el.value() || s.value() != el.value())
-                std::cout << Color::Modifier(Color::Code::FG_RED) << "FAIL" << Color::Modifier(Color::Code::FG_DEFAULT);
+                std::cout << Color::Red() << "FAIL" << Color::DefColor();
             else
-                std::cout << Color::Modifier(Color::Code::FG_GREEN) << "PASS" << Color::Modifier(Color::Code::FG_DEFAULT);
+                std::cout << Color::Green() << "PASS" << Color::DefColor();
 
             std::string s_value;
             if (s.value().is_string())
