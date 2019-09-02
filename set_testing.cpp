@@ -20,6 +20,28 @@ using nlohmann::json;
 //namespace bh = boost::histogram;
 //using namespace bh::literals;
 
+namespace Color {
+    enum Code {
+        FG_RED      = 31,
+        FG_GREEN    = 32,
+        FG_BLUE     = 34,
+        FG_DEFAULT  = 39,
+        BG_RED      = 41,
+        BG_GREEN    = 42,
+        BG_BLUE     = 44,
+        BG_DEFAULT  = 49
+    };
+    class Modifier {
+        Code code;
+        public:
+        Modifier(Code pCode) : code(pCode) {}
+        friend std::ostream&
+            operator<<(std::ostream& os, const Modifier& mod) {
+                return os << "\033[" << mod.code << "m";
+            }
+    };
+}
+
 struct TestCase {
     std::string command;
     json expected_vars;
@@ -285,9 +307,9 @@ void * my_conn_thread(void *arg) {
             auto s = proxysql_vars["conn"].find(el.key());
 
             if (k.value() != el.value() || s.value() != el.value())
-                std::cout << "FAIL";
+                std::cout << Color::Modifier(Color::Code::FG_RED) << "FAIL" << Color::Modifier(Color::Code::FG_DEFAULT);
             else
-                std::cout << "PASS";
+                std::cout << Color::Modifier(Color::Code::FG_GREEN) << "PASS" << Color::Modifier(Color::Code::FG_DEFAULT);
 
             std::string s_value;
             if (s.value().is_string())
