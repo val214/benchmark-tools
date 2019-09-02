@@ -88,7 +88,7 @@ char *host=(char *)"localhost";
 int port=3306;
 int multiport=1;
 char *schema=(char *)"information_schema";
-int silent;
+int silent = 0;
 int sysbench = 0;
 int keep_open=0;
 int local=0;
@@ -109,6 +109,16 @@ __thread int g_seed;
 inline int fastrand() {
 	g_seed = (214013*g_seed+2531011);
 	return (g_seed>>16)&0x7FFF;
+}
+
+void parseResultJsonColumn(MYSQL_RES *result, json& j) {
+        if(!result) return;
+        MYSQL_ROW row;
+
+        int num_fields = mysql_num_fields(result);
+
+        while ((row = mysql_fetch_row(result)))
+            j = json::parse(row[0]);
 }
 
 void parseResult(MYSQL_RES *result, json& j) {
@@ -150,8 +160,39 @@ void queryVariables(MYSQL *mysql, json& j) {
 
         printf("actual: %s\n", j.dump().c_str());
 
-       mysql_free_result(result);
+        mysql_free_result(result);
         __sync_fetch_and_add(&g_select_OK,1);
+    }
+}
+
+void queryInternalStatus(MYSQL *mysql, json& j) {
+    char *query = (char*)"PROXYSQL INTERNAL SESSION";
+
+    if (mysql_query(mysql, query)) {
+        if (silent==0) {
+            fprintf(stderr,"%s\n", mysql_error(mysql));
+        }
+    } else {
+        MYSQL_RES *result = mysql_store_result(mysql);
+        parseResultJsonColumn(result, j);
+
+        mysql_free_result(result);
+        __sync_fetch_and_add(&g_select_OK,1);
+    }
+
+    for (auto& el : j.items()) {
+        if (el.key() == "conn") {
+            std::string sql_log_bin_value;
+
+            if (el.value()["sql_log_bin"] == 1) {
+                el.value().erase("sql_log_bin");
+                j["conn"]["sql_log_bin"] = "ON";
+            }
+            else if (el.value()["sql_log_bin"] == 0) {
+                el.value().erase("sql_log_bin");
+                j["conn"]["sql_log_bin"] = "OFF";
+            }
+        }
     }
 }
 
@@ -236,13 +277,26 @@ void * my_conn_thread(void *arg) {
 		json mysql_vars;
         queryVariables(mysql, mysql_vars);
 
+        json proxysql_vars;
+        queryInternalStatus(mysql, proxysql_vars);
+
         for (auto& el : vars.items()) {
             auto k = mysql_vars.find(el.key());
-            if (k.value() != el.value())
-                printf("FAIL - variable: %s, expected: %s, actual: %s\n", el.key().c_str(), el.value().get<std::string>().c_str(), k.value().get<std::string>().c_str());
-            else
-                printf("PASS - variable: %s, expected: %s, actual: %s\n", el.key().c_str(), el.value().get<std::string>().c_str(), k.value().get<std::string>().c_str());
+            auto s = proxysql_vars["conn"].find(el.key());
 
+            if (k.value() != el.value() || s.value() != el.value())
+                std::cout << "FAIL";
+            else
+                std::cout << "PASS";
+
+            std::string s_value;
+            if (s.value().is_string())
+                s_value = s.value().get<std::string>().c_str();
+            if(s.value().is_number())
+                s_value = std::to_string(s.value().get<int>());
+
+            std::cout << " - variable: '" << el.key().c_str() << "', expected: '" << el.value().get<std::string>().c_str()
+                        << "', mysql: " << k.value().get<std::string>().c_str() << "', proxysql: '" << s_value.c_str() << "'\n";
         }
 
         printf("\n\n");
