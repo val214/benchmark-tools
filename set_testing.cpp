@@ -141,6 +141,9 @@ unsigned int g_connect_ERR=0;
 unsigned int g_select_OK=0;
 unsigned int g_select_ERR=0;
 
+unsigned int g_passed=0;
+unsigned int g_failed=0;
+
 unsigned int status_connections = 0;
 unsigned int connect_phase_completed = 0;
 unsigned int query_phase_completed = 0;
@@ -339,10 +342,14 @@ void * my_conn_thread(void *arg) {
             auto k = mysql_vars.find(el.key());
             auto s = proxysql_vars["conn"].find(el.key());
 
-            if (k.value() != el.value() || s.value() != el.value())
+            if (k.value() != el.value() || s.value() != el.value()) {
                 std::cout << Color::Red() << "FAIL" << Color::DefColor();
-            else
+                __sync_fetch_and_add(&g_failed, 1);
+            }
+            else {
                 std::cout << Color::Green() << "PASS" << Color::DefColor();
+                __sync_fetch_and_add(&g_passed, 1);
+            }
 
             std::string s_value;
             if (s.value().is_string())
@@ -506,6 +513,9 @@ int main(int argc, char *argv[]) {
 	}
 	std::cerr << "Created " << __sync_fetch_and_add(&status_connections,0) << " connections in "  << double( end_conn - begin_conn ) / 1000 << " millisecs.\n" ;
 	std::cerr << "Executed " << __sync_fetch_and_add(&g_select_OK,0) << " queries in "  << double( end_query - begin_query ) / 1000 << " millisecs.\n" ;
+
+	std::cerr << Color::Red() << "\n\nTotal FAIL " << __sync_fetch_and_add(&g_failed, 0) << Color::DefColor() << "\n";
+	std::cerr << Color::Green() << "Total PASS " << __sync_fetch_and_add(&g_passed, 0) << Color::DefColor() << "\n\n";
 
 	exit(EXIT_SUCCESS);
 }
