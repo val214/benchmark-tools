@@ -266,7 +266,7 @@ void * my_conn_thread(void *arg) {
 	char query[128];
 	unsigned long long b, e, ce;
 	MYSQL **mysqlconns=(MYSQL **)malloc(sizeof(MYSQL *)*count);
-	json vars;
+	std::vector<json> varsperconn(count);
 
 	if (mysqlconns==NULL) {
 		exit(EXIT_FAILURE);
@@ -291,6 +291,7 @@ void * my_conn_thread(void *arg) {
 	while(__sync_fetch_and_add(&connect_phase_completed,0) != num_threads) {
 	}
 	MYSQL *mysql;
+	json vars;
 	for (j=0; j<queries; j++) {
 		int fr = fastrand();
 		int r1=fr%count;
@@ -298,6 +299,7 @@ void * my_conn_thread(void *arg) {
 
 		if (j%queries_per_connections==0) {
 			mysql=mysqlconns[r1];
+			vars = varsperconn[r1];
 		}
 
         for (auto& el : testCases[r2].expected_vars.items()) {
