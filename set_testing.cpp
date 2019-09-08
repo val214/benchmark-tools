@@ -11,6 +11,7 @@
 #include <boost/histogram.hpp>
 #include <iostream>
 #include <fstream>
+#include <mutex>
 #include "json.hpp"
 
 using nlohmann::json;
@@ -191,7 +192,7 @@ void dumpResult(MYSQL_RES *result) {
         }
  }
 
-void queryVariables(MYSQL *mysql, json& j) {
+void queryVariables(MYSQL *mysql, json& j, std::stringstream& ss) {
     char *query = (char*)"SELECT * FROM performance_schema.session_variables WHERE variable_name IN "
                          " ('hostname', 'sql_log_bin', 'sql_mode', 'init_connect', 'time_zone', 'autocommit', 'sql_auto_is_null', 'sql_safe_updates', 'session_track_gtids', 'max_join_size', 'net_write_timeout', 'sql_select_limit');";
     if (mysql_query(mysql, query)) {
@@ -202,7 +203,7 @@ void queryVariables(MYSQL *mysql, json& j) {
         MYSQL_RES *result = mysql_store_result(mysql);
         parseResult(result, j);
 
-        printf("actual: %s\n", j.dump().c_str());
+		ss << "mysql actuals : " << j.dump() << "\n";
 
         mysql_free_result(result);
         __sync_fetch_and_add(&g_select_OK,1);
@@ -263,7 +264,6 @@ void * my_conn_thread(void *arg) {
 	unsigned int select_ERR=0;
 	char arg_on=1;
 	int i, j;
-	char query[128];
 	unsigned long long b, e, ce;
 	MYSQL **mysqlconns=(MYSQL **)malloc(sizeof(MYSQL *)*count);
 	std::vector<json> varsperconn(count);
@@ -292,25 +292,23 @@ void * my_conn_thread(void *arg) {
 	}
 	MYSQL *mysql;
 	json vars;
+	unsigned int connum;
 	for (j=0; j<queries; j++) {
 		int fr = fastrand();
 		int r1=fr%count;
         int r2=fastrand()%testCases.size();
+		std::stringstream ss;
+		ss << "Connection number : " << connum << "\n";;
 
 		if (j%queries_per_connections==0) {
 			mysql=mysqlconns[r1];
 			vars = varsperconn[r1];
+			connum = r1;
 		}
 
-        for (auto& el : testCases[r2].expected_vars.items()) {
-            vars[el.key()] = el.value();
-        }
-       printf("expected: %s\n", vars.dump().c_str());
-       sprintf(query,"%s", testCases[r2].command.c_str());
+		ss << testCases[r2].command.c_str() << "\n";
 
-        printf("%s\n", query);
-
-        if (mysql_query(mysql, query)) {
+        if (mysql_query(mysql, testCases[r2].command.c_str())) {
             if (silent==0) {
                 fprintf(stderr,"%s\n", mysql_error(mysql));
             }
@@ -320,10 +318,15 @@ void * my_conn_thread(void *arg) {
 			select_OK++;
 			__sync_fetch_and_add(&g_select_OK,1);
 		}
+        for (auto& el : testCases[r2].expected_vars.items()) {
+            vars[el.key()] = el.value();
+        }
+		ss << "expected: " << vars.dump() << "\n";
 
 		int sleepDelay = fastrand()%100;
 		usleep(sleepDelay * 1000);
 
+		char query[128];
 		sprintf(query, "SELECT %d;", sleepDelay);
 		if (mysql_query(mysql,query)) {
             select_ERR++;
@@ -334,8 +337,10 @@ void * my_conn_thread(void *arg) {
 			select_OK++;
 			__sync_fetch_and_add(&g_select_OK,1);
 		}
+
+
 		json mysql_vars;
-        queryVariables(mysql, mysql_vars);
+        queryVariables(mysql, mysql_vars, ss);
 
         json proxysql_vars;
         queryInternalStatus(mysql, proxysql_vars);
@@ -345,11 +350,11 @@ void * my_conn_thread(void *arg) {
             auto s = proxysql_vars["conn"].find(el.key());
 
             if (k.value() != el.value() || s.value() != el.value()) {
-                std::cout << Color::Red() << "FAIL" << Color::DefColor();
+                ss << Color::Red() << "FAIL" << Color::DefColor();
                 __sync_fetch_and_add(&g_failed, 1);
             }
             else {
-                std::cout << Color::Green() << "PASS" << Color::DefColor();
+                ss << Color::Green() << "PASS" << Color::DefColor();
                 __sync_fetch_and_add(&g_passed, 1);
             }
 
@@ -359,11 +364,18 @@ void * my_conn_thread(void *arg) {
             if(s.value().is_number())
                 s_value = std::to_string(s.value().get<int>());
 
-            std::cout << " - variable: '" << el.key().c_str() << "', expected: '" << el.value().get<std::string>().c_str()
+            ss << " - variable: '" << el.key().c_str() << "', expected: '" << el.value().get<std::string>().c_str()
                         << "', mysql: " << k.value().get<std::string>().c_str() << "', proxysql: '" << s_value.c_str() << "'\n";
+
         }
 
-        printf("\n\n");
+        ss << "\n\n";
+
+		{
+			std::mutex mtx;
+			std::lock_guard<std::mutex> lock(mtx);
+			std::cerr << ss.str();
+        }
 	}
 	__sync_fetch_and_add(&query_phase_completed,1);
 
